@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simepar - Mapa de Temperaturas do Paraná</title>
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; background: #f0f0f0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; background: #ffffff; }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1;
+        }
+
+        .controls h2 { margin: 0 0 10px 0; font-size: 18px; }
+
+        .theme-selector { display: flex; flex-direction: column; gap: 8px; }
+
+        label { cursor: pointer; display: flex; align-items: center; gap: 5px; }
+
+        .legend {
+            position: absolute;
+            bottom: 30px;
+            right: 20px;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1;
+            width: 200px;
+        }
+
+        .legend-ramp {
+            height: 15px;
+            width: 100%;
+            background: linear-gradient(to right, #440154, #482878, #3e4989, #31688e, #26828e, #1f9e89, #35b779, #6ece58, #b5de2b, #fde725);
+            margin-bottom: 5px;
+        }
+
+        .legend-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            pointer-events: none;
+            display: none;
+            z-index: 2;
+        }
+    </style>
+</head>
+<body>
+
+<div class="controls">
+    <h2>Temperaturas PR</h2>
+    <div class="theme-selector">
+        <label><input type="radio" name="theme" value="temp_atual" checked> Atual</label>
+        <label><input type="radio" name="theme" value="temp_max"> Máxima (prevista)</label>
+        <label><input type="radio" name="theme" value="temp_min"> Mínima (prevista)</label>
+    </div>
+</div>
+
+<div class="legend">
+    <div id="legend-title" style="font-size: 14px; margin-bottom: 5px; font-weight: bold;">Temperatura (&deg;C)</div>
+    <div class="legend-ramp"></div>
+    <div class="legend-labels">
+        <span id="min-label">--</span>
+        <span id="max-label">--</span>
+    </div>
+</div>
+
+<div id="tooltip" class="tooltip"></div>
+<div id="map"></div>
+
+<script>
+    const viridisColors = [
+        '#440154', '#482878', '#3e4989', '#31688e', '#26828e',
+        '#1f9e89', '#35b779', '#6ece58', '#b5de2b', '#fde725'
+    ];
+
+    const map = new maplibregl.Map({
+        container: 'map',
+        style: {
+            "version": 8,
+            "sources": {},
+            "layers": [
+                {
+                    "id": "background",
+                    "type": "background",
+                    "paint": { "background-color": "#ffffff" }
+                }
+            ]
+        },
+        center: [-51.5, -24.5],
+        zoom: 6.5
+    });
+
+    let geojsonData;
+
+    map.on('load', async () => {
+        const response = await fetch('parana.geojson');
+        geojsonData = await response.json();
+
+        map.addSource('municipios', {
+            type: 'geojson',
+            data: geojsonData,
+            generateId: true
+        });
+
+        map.addLayer({
+            id: 'municipios-fill',
+            type: 'fill',
+            source: 'municipios',
+            paint: {
+                'fill-opacity': 0.8
+            }
+        });
+
+        map.addLayer({
+            id: 'municipios-outline',
+            type: 'line',
+            source: 'municipios',
+            paint: {
+                'line-color': '#000',
+                'line-width': [
+                    'case',
+                    ['boolean', ['feature-state', 'hover'], false],
+                    3,
+                    0.2
+                ]
+            }
+        });
+
+        updateMap('temp_atual');
+
+        document.querySelectorAll('input[name="theme"]').forEach(input => {
+            input.addEventListener('change', (e) => {
+                updateMap(e.target.value);
+            });
+        });
+
+        let hoveredId = null;
+        const tooltip = document.getElementById('tooltip');
+
+        map.on('mousemove', 'municipios-fill', (e) => {
+            if (e.features.length > 0) {
+                if (hoveredId !== null) {
+                    map.setFeatureState(
+                        { source: 'municipios', id: hoveredId },
+                        { hover: false }
+                    );
+                }
+                hoveredId = e.features[0].id;
+                map.setFeatureState(
+                    { source: 'municipios', id: hoveredId },
+                    { hover: true }
+                );
+
+                const props = e.features[0].properties;
+                const theme = document.querySelector('input[name="theme"]:checked').value;
+                const temp = props[theme] !== undefined ? props[theme] + '°C' : 'N/A';
+
+                tooltip.style.display = 'block';
+                tooltip.innerHTML = `<strong>${props.nome}</strong><br>${temp}`;
+                tooltip.style.left = (e.originalEvent.pageX + 10) + 'px';
+                tooltip.style.top = (e.originalEvent.pageY + 10) + 'px';
+            }
+        });
+
+        map.on('mouseleave', 'municipios-fill', () => {
+            if (hoveredId !== null) {
+                map.setFeatureState(
+                    { source: 'municipios', id: hoveredId },
+                    { hover: false }
+                );
+            }
+            hoveredId = null;
+            tooltip.style.display = 'none';
+        });
+    });
+
+    function updateMap(property) {
+        const values = geojsonData.features
+            .map(f => f.properties[property])
+            .filter(v => v !== undefined && v !== null);
+
+        if (values.length === 0) return;
+
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+
+        document.getElementById('min-label').innerText = min + '°C';
+        document.getElementById('max-label').innerText = max + '°C';
+
+        // Update Legend title
+        const labels = {
+            'temp_atual': 'Temperatura Atual (°C)',
+            'temp_max': 'Temp. Máxima (prevista) (°C)',
+            'temp_min': 'Temp. Mínima (prevista) (°C)'
+        };
+        document.getElementById('legend-title').innerText = labels[property];
+
+        const step = (max - min) / (viridisColors.length - 1);
+        const stops = viridisColors.map((color, i) => [min + i * step, color]);
+
+        map.setPaintProperty('municipios-fill', 'fill-color', [
+            'interpolate',
+            ['linear'],
+            ['get', property],
+            ...stops.flat()
+        ]);
+    }
+</script>
+
+</body>
+</html>
