@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import time
 import re
 import os
+from tqdm import tqdm
 
 GEOJSON_FILE = "parana.geojson"
 
@@ -12,8 +13,7 @@ def get_forecast(ibge_code):
     try:
         response = requests.get(url, timeout=15)
         if response.status_code != 200:
-            print(f"Error fetching {ibge_code}: Status {response.status_code}")
-            return None
+            return None, f"HTTP Status {response.status_code}"
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -50,15 +50,17 @@ def get_forecast(ibge_code):
                         min_temp = temps[0] # Today's min
                 break
 
+        if current_temp is None and max_temp is None and min_temp is None:
+            return None, "No temperature data parsed from the county page"
+
         return {
             'temp_atual': current_temp,
             'temp_max': max_temp,
             'temp_min': min_temp,
             'updated_at': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
+        }, None
     except Exception as e:
-        print(f"Exception fetching {ibge_code}: {e}")
-        return None
+        return None, f"Exception: {str(e)}"
 
 def update_geojson():
     with open(GEOJSON_FILE, 'r', encoding='utf-8') as f:
@@ -67,22 +69,42 @@ def update_geojson():
     total = len(data['features'])
     print(f"Updating {total} municipalities...")
 
-    for i, feature in enumerate(data['features']):
+    for feature in tqdm(data['features'], desc="Scraping municipalities"):
         ibge_code = feature['properties']['codarea']
         nome = feature['properties']['nome']
-        print(f"[{i+1}/{total}] Fetching data for {nome} ({ibge_code})...")
 
-        forecast = get_forecast(ibge_code)
+        forecast, error_msg = get_forecast(ibge_code)
         if forecast:
             feature['properties'].update(forecast)
         else:
-            print(f"Failed to get forecast for {nome}")
+            url = f'https://www.simepar.br/simepar/forecast_by_counties/{ibge_code}'
+            tqdm.write(f"Failed to get forecast for {nome}: {error_msg} (URL: {url})")
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            with open("scrape.log", "a", encoding="utf-8") as log_file:
+                log_file.write(f"[{timestamp}] Failed: {nome} ({ibge_code}) - {error_msg} - URL: {url}\n")
 
         # Small delay to avoid being blocked
         time.sleep(0.1)
 
+    print("Saving prettified GeoJSON...")
     with open(GEOJSON_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, separators=(',', ':'), ensure_ascii=False)
+        f.write('{\n')
+        f.write('  "type": "FeatureCollection",\n')
+        f.write('  "features": [\n')
+        
+        features = data['features']
+        total_features = len(features)
+        for idx, feature in enumerate(features):
+            feature_str = json.dumps(feature, separators=(',', ':'), ensure_ascii=False)
+            f.write('    ' + feature_str)
+            if idx < total_features - 1:
+                f.write(',\n')
+            else:
+                f.write('\n')
+                
+        f.write('  ]\n')
+        f.write('}\n')
+    
     print("GeoJSON updated successfully.")
 
 if __name__ == "__main__":

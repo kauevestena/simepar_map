@@ -33,7 +33,7 @@ Visualizador em mapa coroplético das temperaturas atuais e previstas (máxima e
 1. Clone o repositório.
 2. Certifique-se de ter o Python instalado para rodar o scraper se desejar atualizar os dados manualmente:
    ```bash
-   pip install beautifulsoup4 requests
+   pip install beautifulsoup4 requests tqdm
    python scrape_simepar.py
    ```
 3. Abra o arquivo `index.html` em um servidor local (necessário para carregar o GeoJSON):

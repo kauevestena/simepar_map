@@ -13,15 +13,50 @@
         .controls {
             position: absolute;
             top: 20px;
-            left: 20px;
+            right: 20px;
             background: white;
             padding: 15px;
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             z-index: 1;
+            max-width: 250px;
         }
 
-        .controls h2 { margin: 0 0 10px 0; font-size: 18px; }
+        .controls h3 { margin: 0 0 10px 0; font-size: 14px; }
+
+        .controls-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .controls-header span {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .controls-content {
+            margin-top: 15px;
+            display: block;
+        }
+        .title-container {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1;
+            text-align: center;
+        }
+
+        .title-container h2 { margin: 0 0 5px 0; font-size: 18px; }
+        .title-container p { margin: 0; font-size: 12px; color: #555; }
 
         .theme-selector { display: flex; flex-direction: column; gap: 8px; }
 
@@ -67,12 +102,30 @@
 </head>
 <body>
 
+<div class="title-container">
+    <h2>Dados Municipais de Temperatura - extraído de www.simepar.br</h2>
+    <p id="update-time">Atualizado pela ultima vez em --</p>
+</div>
+
 <div class="controls">
-    <h2>Temperaturas PR</h2>
-    <div class="theme-selector">
-        <label><input type="radio" name="theme" value="temp_atual" checked> Atual</label>
-        <label><input type="radio" name="theme" value="temp_max"> Máxima (prevista)</label>
-        <label><input type="radio" name="theme" value="temp_min"> Mínima (prevista)</label>
+    <div class="controls-header" id="controls-toggle">
+        Configurações <span id="controls-icon">[-]</span>
+    </div>
+    <div class="controls-content" id="controls-content">
+        <h3>Fundo</h3>
+        <div class="theme-selector" style="margin-bottom: 15px;">
+            <label><input type="radio" name="bg" value="none"> Nenhum</label>
+            <label><input type="radio" name="bg" value="osm_positron" checked> OSM Positron</label>
+            <label><input type="radio" name="bg" value="osm_default"> OSM Default</label>
+            <label><input type="radio" name="bg" value="bing"> Bing Imagery</label>
+        </div>
+
+        <h3>Variável</h3>
+        <div class="theme-selector">
+            <label><input type="radio" name="theme" value="temp_atual" checked> Atual</label>
+            <label><input type="radio" name="theme" value="temp_max"> Máxima (prevista)</label>
+            <label><input type="radio" name="theme" value="temp_min"> Mínima (prevista)</label>
+        </div>
     </div>
 </div>
 
@@ -111,16 +164,63 @@
         zoom: 6.5
     });
 
+    map.addControl(new maplibregl.ScaleControl({
+        maxWidth: 200,
+        unit: 'metric'
+    }), 'bottom-left');
+
     let geojsonData;
 
     map.on('load', async () => {
         const response = await fetch('parana.geojson');
         geojsonData = await response.json();
 
+        const updatedAt = geojsonData.features[0]?.properties?.updated_at;
+        if (updatedAt) {
+            document.getElementById('update-time').innerText = `Atualizado pela ultima vez em ${updatedAt} BRT`;
+        }
+
+        map.addSource('osm_positron', {
+            type: 'raster',
+            tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
+            tileSize: 256
+        });
+        map.addSource('osm_default', {
+            type: 'raster',
+            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+            tileSize: 256
+        });
+        map.addSource('bing', {
+            type: 'raster',
+            tiles: ['https://ecn.t3.tiles.virtualearth.net/tiles/a{quadkey}.jpeg?g=1'],
+            tileSize: 256
+        });
+
         map.addSource('municipios', {
             type: 'geojson',
             data: geojsonData,
             generateId: true
+        });
+
+        map.addLayer({
+            id: 'osm_positron_layer',
+            type: 'raster',
+            source: 'osm_positron',
+            layout: { visibility: 'visible' }
+        });
+
+        map.addLayer({
+            id: 'osm_default_layer',
+            type: 'raster',
+            source: 'osm_default',
+            layout: { visibility: 'none' }
+        });
+
+        map.addLayer({
+            id: 'bing_layer',
+            type: 'raster',
+            source: 'bing',
+            layout: { visibility: 'none' }
         });
 
         map.addLayer({
@@ -155,10 +255,20 @@
             });
         });
 
+        document.querySelectorAll('input[name="bg"]').forEach(input => {
+            input.addEventListener('change', (e) => {
+                const selected = e.target.value;
+                map.setLayoutProperty('osm_positron_layer', 'visibility', selected === 'osm_positron' ? 'visible' : 'none');
+                map.setLayoutProperty('osm_default_layer', 'visibility', selected === 'osm_default' ? 'visible' : 'none');
+                map.setLayoutProperty('bing_layer', 'visibility', selected === 'bing' ? 'visible' : 'none');
+            });
+        });
+
         let hoveredId = null;
         const tooltip = document.getElementById('tooltip');
 
         map.on('mousemove', 'municipios-fill', (e) => {
+            map.getCanvas().style.cursor = 'pointer';
             if (e.features.length > 0) {
                 if (hoveredId !== null) {
                     map.setFeatureState(
@@ -184,6 +294,7 @@
         });
 
         map.on('mouseleave', 'municipios-fill', () => {
+            map.getCanvas().style.cursor = '';
             if (hoveredId !== null) {
                 map.setFeatureState(
                     { source: 'municipios', id: hoveredId },
@@ -192,6 +303,44 @@
             }
             hoveredId = null;
             tooltip.style.display = 'none';
+        });
+
+        map.on('click', 'municipios-fill', (e) => {
+            if (e.features.length > 0) {
+                const props = e.features[0].properties;
+                const url = `https://www.simepar.br/simepar/forecast_by_counties/${props.codarea}`;
+                
+                const html = `
+                    <div style="font-family: sans-serif; font-size: 14px; min-width: 150px;">
+                        <h3 style="margin: 0 0 10px 0;">
+                            <a href="${url}" target="_blank" style="color: #0078A8; text-decoration: none;">${props.nome}</a>
+                        </h3>
+                        <p style="margin: 5px 0;"><strong>Temp. Atual:</strong> ${props.temp_atual !== undefined ? props.temp_atual + '°C' : 'N/A'}</p>
+                        <p style="margin: 5px 0;"><strong>Temp. Máxima:</strong> ${props.temp_max !== undefined ? props.temp_max + '°C' : 'N/A'}</p>
+                        <p style="margin: 5px 0;"><strong>Temp. Mínima:</strong> ${props.temp_min !== undefined ? props.temp_min + '°C' : 'N/A'}</p>
+                        <p style="margin: 5px 0; font-size: 11px; color: #666;">Atualizado: ${props.updated_at || 'N/A'}</p>
+                    </div>
+                `;
+
+                new maplibregl.Popup()
+                    .setLngLat(e.lngLat)
+                    .setHTML(html)
+                    .addTo(map);
+            }
+        });
+
+        const controlsToggle = document.getElementById('controls-toggle');
+        const controlsContent = document.getElementById('controls-content');
+        const controlsIcon = document.getElementById('controls-icon');
+
+        controlsToggle.addEventListener('click', () => {
+            if (controlsContent.style.display === 'none') {
+                controlsContent.style.display = 'block';
+                controlsIcon.innerText = '[-]';
+            } else {
+                controlsContent.style.display = 'none';
+                controlsIcon.innerText = '[+]';
+            }
         });
     });
 
