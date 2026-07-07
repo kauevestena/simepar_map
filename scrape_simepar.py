@@ -2,6 +2,7 @@ import json
 import requests
 from bs4 import BeautifulSoup
 import time
+from datetime import datetime, timezone, timedelta
 import re
 import os
 from tqdm import tqdm
@@ -57,7 +58,7 @@ def get_forecast(ibge_code):
             'temp_atual': current_temp,
             'temp_max': max_temp,
             'temp_min': min_temp,
-            'updated_at': time.strftime('%Y-%m-%d %H:%M:%S')
+            'updated_at': datetime.now(timezone(timedelta(hours=-3))).strftime('%Y-%m-%d %H:%M:%S')
         }, None
     except Exception as e:
         return None, f"Exception: {str(e)}"
@@ -79,7 +80,7 @@ def update_geojson():
         else:
             url = f'https://www.simepar.br/simepar/forecast_by_counties/{ibge_code}'
             tqdm.write(f"Failed to get forecast for {nome}: {error_msg} (URL: {url})")
-            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            timestamp = datetime.now(timezone(timedelta(hours=-3))).strftime('%Y-%m-%d %H:%M:%S')
             with open("scrape.log", "a", encoding="utf-8") as log_file:
                 log_file.write(f"[{timestamp}] Failed: {nome} ({ibge_code}) - {error_msg} - URL: {url}\n")
 
